@@ -193,13 +193,13 @@ Design a cloud-based file storage and synchronization service similar to Google 
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Client Layer                             │
+│                         Client Layer                            │
 │  (Desktop App, Mobile App, Web Browser)                         │
 └────────────────────┬────────────────────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────────────────────┐
-│                    API Gateway / Load Balancer                   │
-│              (Request routing, Auth, Rate limiting)              │
+│                    API Gateway / Load Balancer                  │
+│              (Request routing, Auth, Rate limiting)             │
 └────────────────────┬────────────────────────────────────────────┘
                      │
         ┌────────────┼────────────┬────────────────┐
@@ -210,8 +210,8 @@ Design a cloud-based file storage and synchronization service similar to Google 
 └─────────────┘  └──┬────────┘  └──┬───────────┘ └────┬───────────┘
                     │               │                  │
                     │         ┌─────▼──────────────────▼────┐
-                    │         │    Block/Chunk Server        │
-                    │         │  (Chunking, Compression)     │
+                    │         │    Block/Chunk Server       │
+                    │         │  (Chunking, Compression)    │
                     │         └────────┬────────────────────┘
                     │                  │
         ┌───────────▼────┐    ┌────────▼──────────┐
@@ -227,13 +227,13 @@ Design a cloud-based file storage and synchronization service similar to Google 
                    │
         ┌──────────▼──────────────────┐
         │  Message Queue Service      │
-        │  (RabbitMQ/Kafka/SQS)      │
+        │  (RabbitMQ/Kafka/SQS)       │
         └──────────┬──────────────────┘
                    │
         ┌──────────▼──────────────────┐
         │  Notification Service       │
-        │  (WebSocket/SSE/Push)      │
-        └────────────────────────────┘
+        │  (WebSocket/SSE/Push)       │
+        └─────────────────────────────┘
 ```
 
 ### 6.2 Component Description
