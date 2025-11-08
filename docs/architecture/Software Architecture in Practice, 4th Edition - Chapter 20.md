@@ -1,4 +1,4 @@
-## 20. Designing an Architecture
+# 20. Designing an Architecture
 
 With Humberto Cervantes
 
@@ -20,7 +20,7 @@ Architectural design for software systems is no different than design in general
 
 ---XXX---
 
-## Figura 20.1 Overview of the architecture design activity
+Figura 20.1 Overview of the architecture design activity
 
 ---XXX---
 
