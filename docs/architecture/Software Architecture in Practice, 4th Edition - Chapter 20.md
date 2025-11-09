@@ -52,15 +52,11 @@ Within each iteration, a series of design steps is performed. ADD provides detai
 
 Before starting a design round, you need to ensure that the architectural drivers (the inputs to the design process) are available and correct. These include:
 
-The purpose of the design round
-
-The primary functional requirements
-
-The primary quality attribute (QA) scenarios
-
-Any constraints
-
-Any concerns
+- The purpose of the design round
+- The primary functional requirements
+- The primary quality attribute (QA) scenarios
+- Any constraints
+- Any concerns
 
 Why do we explicitly capture the design purpose? You need to make sure that you are clear about your goals for a round. In an incremental design context comprising multiple rounds, the purpose for a design round may be, for example, to produce a design for early estimation, to refine an existing design to build a new increment of the system, or to design and generate a prototype to mitigate certain technical risks. In addition you need to know the existing architecture's design, if this is not greenfield development.
 
@@ -172,13 +168,13 @@ It is often the case that architectural decisions must be made with imperfect kn
 
 For example, suppose a team needs to decide whether the system they are designing should be based on a traditional three-tier architecture or should be microservices, but they are not confident about that approach. They do a coarse estimation (within two alternatives, not project that the cost of developing the three-tier architecture would be $500,000 and that of developing the microservices would be $650,000. If, having developed the three-tier architecture, the team later concluded that the wrong architecture was chosen, the estimated refactoring cost would be $300,000. If the microservices architecture was the first one developed, and a later refactoring was needed, its estimated refactoring cost would be $150,000.
 
-What should the team do?
-
-To decide whether it is worth it to conduct the experiments, or how much we should be willing to pay for them, we can follow this reasoning: If experiments can be gained and the cost of being wrong, the team could use a technique known as Value of Information (VoI) to tackle the question. The VoI technique is used to calculate the expected gain from a reduction in the uncertainty surrounding a decision through some form of data collection exercise: in this case, the construction of prototypes. To use VoI, the team will need to assess the following parameters: the cost of making the wrong design choice, the cost of performing the experiments, the team's level of confidence in each design choice, and their level of confidence in the results of the experiments. Using these estimates, VoI then applies Bayes's Theorem to calculate two quantities: the expected value of perfect information (EVPI) and the expected value of sample information (EVSI). If the experiments can be conducted, the team should be willing to pay for the experiments, were they to provide definitive results (i.e., no false positives or false negatives). EVPI represents how much one should be willing to spend knowing that the results of the experiment might not identify the right solution with 100 percent certainty.
-
-As these results represent expected values, they should be evaluated in the larger context of a risk.
-
-—Eduardo Miranda
+> What should the team do?
+>
+> To decide whether it is worth it to conduct the experiments, or how much we should be willing to pay for them, we can follow this reasoning: If experiments can be gained and the cost of being wrong, the team could use a technique known as Value of Information (VoI) to tackle the question. The VoI technique is used to calculate the expected gain from a reduction in the uncertainty surrounding a decision through some form of data collection exercise: in this case, the construction of prototypes. To use VoI, the team will need to assess the following parameters: the cost of making the wrong design choice, the cost of performing the experiments, the team's level of confidence in each design choice, and their level of confidence in the results of the experiments. Using these estimates, VoI then applies Bayes's Theorem to calculate two quantities: the expected value of perfect information (EVPI) and the expected value of sample information (EVSI). If the experiments can be conducted, the team should be willing to pay for the experiments, were they to provide definitive results (i.e., no false positives or false negatives). EVPI represents how much one should be willing to spend knowing that the results of the experiment might not identify the right solution with 100 percent certainty.
+>
+> As these results represent expected values, they should be evaluated in the larger context of a risk.
+>
+> —Eduardo Miranda
 
 # 20.4 More on ADD Step 5: Producing Structures
 
