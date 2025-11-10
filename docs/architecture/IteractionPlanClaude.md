@@ -1,3 +1,7 @@
+Escreva um plano de iterações seguindo o processo de Attribute-Driven Design (ADD). Cada iteração deve abordar drivers prioritários (requisitos funcionais, cenários de atributos de qualidade, preocupações e restrições) para construir incrementalmente a arquitetura do sistema.
+
+---
+
 # Plano de Iterações ADD para Google Drive
 
 ## Contexto do Sistema
