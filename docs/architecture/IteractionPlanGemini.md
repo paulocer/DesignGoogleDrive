@@ -1,82 +1,148 @@
-O planejamento da arquitetura do Google Drive usando o processo **Attribute-Driven Design (ADD)** permite abordar os requisitos significativos da arquitetura (ASRs), como escalabilidade e confiabilidade, de forma organizada e incremental.
-
-Com base nos requisitos estabelecidos para o design do Google Drive, a seguir está o plano de iterações em formato markdown.
+Escreva um plano de iterações seguindo o processo de Attribute-Driven Design (ADD). Cada iteração deve abordar drivers prioritários (requisitos funcionais, cenários de atributos de qualidade, preocupações e restrições) para construir incrementalmente a arquitetura do sistema.
 
 ---
 
-# 🗺️ Plano de Iterações do Attribute-Driven Design (ADD) para o Google Drive
+Based on the Attribute-Driven Design (ADD) methodology from *Software Architecture in Practice* and the system requirements from the *Design Google Drive* document, here is an incremental iteration plan for designing the architecture.
 
-O design do sistema é dividido em três iterações principais, priorizando a **Confiabilidade**, a **Escalabilidade** e o **Desempenho** (velocidade de sincronização), que são cruciais para um serviço de armazenamento em nuvem de 10M DAU.
-
-## Tabela Resumo das Iterações
-
-| # | Objetivo da Iteração (Foco) | Drivers Prioritários Abordados | Estruturas Focais | Conceitos de Design (Padrões/Táticas) |
-| :---: | :--- | :--- | :--- | :--- |
-| **1** | **Fundação e Escalabilidade do Armazenamento e Metadados** | **Confiabilidade** (Zero perda de dados), **Alta Disponibilidade**, **Escalabilidade** (10M DAU) | Estruturas C&C e de Alocação | Amazon S3 (Replicação), Sharding (por `user_id`), Load Balancing |
-| **2** | **Otimização de Upload/Download e Sincronização** | **Fast Sync Speed**, **Bandwidth Usage**, **Consistência Forte** | Estruturas C&C | Block Servers (Chunking/Compressão/Criptografia), Delta Sync, Long Polling (Notificação), ACID DB |
-| **3** | **Gerenciamento de Versões, Otimização de Custo e Resiliência** | **Save Storage Space** (Versões), **Resolução de Conflitos**, **Resiliência** (Failure Handling) | Estruturas de Módulo e de Alocação | De-duplicação de Blocos, Cold Storage (S3 Glacier), Estratégias de Failover e Replicação |
+This plan prioritizes drivers to build the system from its core functionality (storage) outward to more complex features (sync, sharing) and systemic qualities (scalability, reliability).
 
 ---
 
-## 🚀 Iteração 1: Fundação e Escalabilidade
+## Overview of the Process
 
-### 🎯 Meta da Iteração
-Criar a arquitetura distribuída básica para o armazenamento de arquivos e metadados, focada em **escalabilidade**, **alta disponibilidade** e **confiabilidade** (zero perda de dados).
-
-### 📝 Drivers Selecionados (ASRs)
-* **Funcionalidade:** Upload e Download de arquivos (nível básico).
-* **Atributos de Qualidade:** Escalabilidade (10M DAU), Alta Disponibilidade, Confiabilidade (Data loss is unacceptable).
-* **Restrições:** Arquivos de **10 GB ou menor**.
-
-### 💡 Conceitos de Design Escolhidos
-1.  **Armazenamento de Arquivos:** Utilizar um serviço de **Cloud Storage** como o **Amazon S3** para aproveitar a escalabilidade e a durabilidade.
-2.  **Confiabilidade:** Implementar **replicação de arquivos** entre regiões (cross-region replication) para garantir que os arquivos possam ser recuperados em caso de falha de uma região.
-3.  **Balanceamento de Carga:** Adicionar um **Load Balancer** para distribuir uniformemente as requisições para os **API Servers** e fornecer failover.
-4.  **Banco de Dados de Metadados:** Implementar **sharding** (fragmentação) do banco de dados, possivelmente baseado em `user_id`, para lidar com o volume e o tráfego de metadados.
-
-### 🧱 Estruturas Produzidas
-* **Estrutura C&C (Componente e Conector):** Diagrama de alto nível mostrando a interação entre Cliente, Load Balancer, API Servers, Metadata DB e File Storage.
+Each iteration will follow the core steps of Attribute-Driven Design (ADD):
+1.  **Review Inputs:** Identify all drivers for the system (functional requirements, quality attribute scenarios, constraints).
+2.  **Establish Iteration Goal:** Select a high-priority subset of drivers to focus on.
+3.  **Choose Elements to Refine:** Select the part of the system (or the whole system, if new) to design.
+4.  **Choose Design Concepts:** Select architectural patterns, tactics, and technologies to satisfy the selected drivers.
+5.  **Instantiate & Define:** Instantiate architectural elements, allocate responsibilities, and define their interfaces.
+6.  **Sketch Views & Record Decisions:** Document the new design (e.g., C&C views, DB schemas) and the rationale.
+7.  **Perform Analysis:** Review the design against the iteration's drivers to ensure they are met.
 
 ---
 
-## ⚡ Iteração 2: Otimização de Upload/Download e Sincronização
+## Iteration 1: Core File Storage and Retrieval
 
-### 🎯 Meta da Iteração
-Otimizar a transferência de dados para alcançar a **Fast Sync Speed** e o **baixo uso de banda**, e garantir a **forte consistência** dos metadados entre os clientes.
+This iteration focuses on the most fundamental use case: getting a file into and out of the system for a single user.
 
-### 📝 Drivers Selecionados (ASRs)
-* **Funcionalidades:** Sincronizar arquivos entre dispositivos, Upload resumível.
-* **Atributos de Qualidade:** Velocidade de sincronização rápida, Uso otimizado da largura de banda, **Consistência Forte** (dados idênticos para todos os clientes).
-
-### 💡 Conceitos de Design Escolhidos
-1.  **Otimização de Transferência (Economia de Banda):** Introduzir **Block Servers** para tarefas pesadas, incluindo **chunking** (divisão em blocos), **compressão** e **criptografia**.
-2.  **Sincronização Eficiente:** Implementar **Delta Sync**, onde apenas os blocos modificados são transferidos para a nuvem em vez do arquivo inteiro.
-3.  **Consistência de Metadados:** Utilizar um **Banco de Dados Relacional** com propriedades **ACID** para metadados e invalidar caches na escrita (`Invalidate caches on database write`) para garantir que o cache e o DB sejam consistentes.
-4.  **Notificação de Sincronização:** Usar **Long Polling** no **Serviço de Notificação** para alertar os clientes sobre alterações de arquivos de forma assíncrona, reduzindo conflitos.
-
-### 🧱 Estruturas Produzidas
-* **Estrutura C&C:** Refinamento do diagrama de alto nível com a adição explícita dos **Block Servers**, **Notification Service** e **Offline Backup Queue**.
-* **Estrutura do Módulo:** Diagramas de sequência para os fluxos detalhados de **Upload** e **Download** de arquivos.
+* **Iteration Goal:** Establish the backbone for file upload and download, ensuring data is stored securely and reliably.
+* **Drivers Addressed:**
+    * **Functional:** Upload files, Download files.
+    * **Quality Attributes:**
+        * **Reliability (Storage):** "Data loss is unacceptable."
+        * **Security:** "Files in the storage must be encrypted."
+    * **Constraints:** File size limit (10 GB), Encryption required.
+* **Design Activities & Concepts:**
+    * **Refine:** The entire system ("greenfield").
+    * **Concepts:** Client-Server, Load Balancing, Object Storage, Metadata Database.
+    * **Instantiate (Elements):**
+        * **API Servers:** (Stateless) To handle user requests.
+        * **Load Balancer:** To distribute traffic to API servers.
+        * **Metadata Database:** To store file information (name, size, path, user_id).
+        * **Cloud Storage (S3):** To store the actual file data.
+    * **Define (Interfaces/Decisions):**
+        * Define basic REST APIs for `upload` and `download`.
+        * Decide on using Amazon S3 for its high durability and built-in encryption.
+        * Define the initial `File` and `User` tables in the Metadata DB.
+* **Views Sketched:** A basic Component-and-Connector (C&C) view showing the flow: Client → Load Balancer → API Server → (Metadata DB + Cloud Storage).
 
 ---
 
-## 🛡️ Iteração 3: Versões, Otimização de Custo e Resiliência
+## Iteration 2: Multi-Device Synchronization
 
-### 🎯 Meta da Iteração
-Otimizar o custo de armazenamento através do gerenciamento de versões e transferir dados inativos para armazenamento mais frio. Além disso, estabelecer estratégias de **Failure Handling** para aumentar a resiliência do sistema.
+This iteration introduces the core "sync" feature, moving from a simple storage service to a synchronization service.
 
-### 📝 Drivers Selecionados (ASRs)
-* **Funcionalidades:** Ver revisões de arquivo, lidar com conflitos de sincronização.
-* **Preocupações:** Economizar espaço de armazenamento (**Save storage space**), Resiliência e Tolerância a Falhas (**Failure Handling**).
+* **Iteration Goal:** Enable changes (adds, edits) from one client to be automatically propagated to other clients registered to the same user.
+* **Drivers Addressed:**
+    * **Functional:** Sync files across multiple devices, Send notifications (on file edit/delete).
+    * **Quality Attributes:**
+        * **Fast Sync Speed:** Changes should propagate quickly.
+        * **High Availability:** The notification system must be reliable.
+* **Design Activities & Concepts:**
+    * **Refine:** Client application, API Servers, and introduce a notification mechanism.
+    * **Concepts:** Publish-Subscriber, Long Polling (as chosen in the design doc), Caching.
+    * **Instantiate (Elements):**
+        * **Notification Service:** To manage open connections with clients.
+        * **Offline Backup Queue:** To hold notifications for disconnected clients.
+        * **Metadata Cache:** To speed up retrieval of file info for sync checks.
+    * **Define (Interfaces/Decisions):**
+        * Define the long polling mechanism: Client establishes a connection to the Notification Service.
+        * Define the Pub/Sub flow: API Server publishes a "change" event (on upload/edit) to the Notification Service, which then informs relevant clients.
+        * Define the client-side logic for "pulling" changes upon receiving a notification.
+* **Views Sketched:** Updated C&C view showing the Notification Service and its connections. A sequence diagram illustrating the end-to-end sync flow.
 
-### 💡 Conceitos de Design Escolhidos
-1.  **Otimização de Custo:**
-    * **De-duplicação de Blocos de Dados:** Eliminar blocos idênticos (com base no hash) para reduzir a redundância no nível da conta.
-    * **Cold Storage:** Mover dados pouco ativos (não acessados por meses ou anos) para armazenamento de baixo custo como o S3 Glacier.
-2.  **Suporte à Versão:** Design do esquema de BD com as tabelas `File_version` e `Block` para armazenar o histórico de revisão de arquivos.
-3.  **Tratamento de Conflitos:** Adotar a estratégia **"the first version that gets processed wins"** (a primeira versão processada vence) e apresentar ao usuário ambas as cópias para resolução manual.
-4.  **Estratégias de Failover:** Definir mecanismos de failover (coração/heartbeat) para o Load Balancer e estratégias de promoção de *slaves* para *master* em caso de falha do Metadata DB.
+---
 
-### 🧱 Estruturas Produzidas
-* **Estrutura do Módulo:** Esboço do esquema detalhado do **Metadata Database** (tabelas User, Device, Namespace, File, File\_version, Block).
-* **Estrutura de Alocação:** Inclusão explícita do componente de **Cold Storage** no mapeamento de dados.
+## Iteration 3: Performance, Efficiency, and Large Files
+
+This iteration optimizes the sync process from Iteration 2, focusing on network efficiency and robustness for large files.
+
+* **Iteration Goal:** Reduce bandwidth usage and improve sync speed by only transferring changes. Support large, resumable uploads.
+* **Drivers Addressed:**
+    * **Functional:** Support for large files (resumable upload).
+    * **Quality Attributes:**
+        * **Low Bandwidth Usage:** "If a product takes a lot of unnecessary network bandwidth, users will be unhappy."
+        * **Fast Sync Speed:** (Achieved via delta sync).
+    * **Concerns:** Handling network interruptions during 10 GB uploads.
+* **Design Activities & Concepts:**
+    * **Refine:** The file upload/download flow.
+    * **Concepts:** File Chunking (Blocking), Delta Sync, Compression, Resumable Upload (Pattern).
+    * **Instantiate (Elements):**
+        * **Block Servers:** A new service to handle the heavy lifting of chunking, compression, encryption, and delta calculation.
+    * **Define (Interfaces/Decisions):**
+        * Define the "Resumable Upload" API (3-step process from the doc).
+        * Define the `Block` table in the Metadata DB to track file blocks.
+        * Reroute the upload flow: Client → Block Server → Cloud Storage (as in Fig. 15-14).
+        * Decide on "delta sync": Only modified blocks are re-uploaded.
+* **Views Sketched:** Detailed sequence diagrams for the upload flow (Fig. 15-14) and download flow (Fig. 15-15), highlighting the role of the Block Servers.
+
+---
+
+## Iteration 4: Collaboration and File History
+
+With a robust sync system in place, this iteration adds collaboration and versioning features.
+
+* **Iteration Goal:** Allow users to share files with others and access previous versions of a file.
+* **Drivers Addressed:**
+    * **Functional:** Share files, See file revisions, Send notifications (on file share).
+    * **Quality Attributes:**
+        * **Reliability (Versioning):** Ability to recover previous file states.
+        * **Security:** Enforcing access controls for shared files.
+    * **Concerns:** Handling sync conflicts when two users edit the same file.
+* **Design Activities & Concepts:**
+    * **Refine:** Metadata Database, API Servers.
+    * **Concepts:** Access Control Lists (ACLs) / Permissions, File Versioning.
+    * **Instantiate (Elements):**
+        * No new *services*, but significant refinement of the `Metadata DB` schema.
+    * **Define (Interfaces/Decisions):**
+        * Add `file_version` table to the DB (Fig. 15-13) to store revision history.
+        * Add tables/fields to manage sharing permissions (e.g., linking users to files with specific roles like 'viewer' or 'editor').
+        * Define new APIs: `share_file()`, `list_revisions()`.
+        * Define the conflict resolution strategy: "First version that gets processed wins" (Fig. 15-8).
+* **Views Sketched:** Updated database schema (Fig. 15-13). Flow diagrams for sync conflict resolution.
+
+---
+
+## Iteration 5: Scalability, Availability, and Cost
+
+This final iteration "hardens" the entire system to meet the massive scale and high availability requirements.
+
+* **Iteration Goal:** Ensure the system can scale to 10M DAU, remain available during failures, and optimize storage costs.
+* **Drivers Addressed:**
+    * **Quality Attributes:**
+        * **Scalability:** "10M DAU."
+        * **High Availability:** "Users should still be able to use the system when some servers are offline."
+        * **Reliability:** (Failure handling for all components).
+    * **Concerns:** High storage costs for 500 Petabytes, database hotspots.
+* **Design Activities & Concepts:**
+    * **Refine:** All components, especially `Metadata DB` and `Cloud Storage`.
+    * **Concepts:** Database Sharding, Database Replication (Master-Slave), Horizontal Scaling, Redundancy, Data De-duplication, Cold Storage (Tiering).
+    * **Instantiate (Elements):**
+        * **Cold Storage (S3 Glacier):** For moving infrequently used data.
+    * **Define (Interfaces/Decisions):**
+        * Sharding strategy for the `Metadata DB` (e.g., by `user_id`).
+        * Replication strategy for DB (promote slave to master) and Caches.
+        * Failure handling playbooks for each component (e.g., LB failure, API server failure).
+        * Data de-duplication strategy (at the block level).
+        * Data tiering policy (e.g., move files/versions not accessed in 90 days to Cold Storage).
+* **Views Sketched:** Deployment/Allocation view showing sharded and replicated databases across multiple data centers. C&C view showing the new Cold Storage tier.
