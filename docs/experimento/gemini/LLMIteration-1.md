@@ -134,43 +134,6 @@ graph TD
 | QAS-016               | Service-Side Encryption in Block Server    | Performing encryption in the Block Server (before S3) ensures strict control over encryption keys and process integrity. It satisfies the requirement to store encrypted data.                                              | Client-Side Encryption: Discarded due to trust issues; compromised clients could upload corrupt data. S3 Server-Side Encryption Only: Discarded as it relies wholly on the provider; we need application-level control.                                            |
 | C-1                   | Use Amazon S3                              | Constraint from the Case Study. Provides necessary durability (99.999999999%) and scalability.                                                                                                                             | HDFS / Custom Storage Cluster: Discarded due to high operational complexity and cost compared to managed S3.                                                                                                                                                       |
 
-As the **Software Architect**, I will now execute **Step 6** of Iteration 1.
-
-In this step, we visualize the structural decisions made in Step 4 and 5 (the separation of API and Block servers) and record the rationale.
-
-Here is the content for **Step 6** to be added to `LLMIteration-1.md`.
-
-## Step 6: Sketch Views and Record Design Decisions
-
-**Sketch: Container Diagram (C4 Level 2)** This diagram visualizes the decomposition of the "Google Drive System" into its core containers. It highlights the separation between metadata handling and file block processing.
-
-```mermaid
-graph TD
-    subgraph "Google Drive System"
-        LB[Load Balancer]
-        API[API Server]
-        Block[Block Server]
-        DB[(Metadata Database)]
-    end
-
-    subgraph "External Actors"
-        User[User Client]
-        S3[Amazon S3]
-        Glacier[Amazon S3 Glacier]
-    end
-
-    User -- "HTTPS (Metadata Ops)" --> LB
-    User -- "HTTPS (File Data)" --> LB
-    
-    LB -- "Routes /api/*" --> API
-    LB -- "Routes /block/*" --> Block
-
-    API -- "Read/Write Metadata (SQL)" --> DB
-    
-    Block -- "Put/Get Encrypted Blocks (HTTPS)" --> S3
-    Block -- "Archive Policies" --> Glacier
-````
-
 **Recorded Design Decisions**:
 
 | Driver | Decision | Rationale | Discarded Alternative |
