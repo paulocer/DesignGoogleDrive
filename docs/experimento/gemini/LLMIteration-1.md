@@ -126,14 +126,6 @@ graph TD
     Block -- "Archive Policies" --> Glacier
 ```
 
-### Recorded Design Decisions:
-
-| Driver                | Decision                                   | Rationale                                                                                                                                                                                                                   | Discarded Alternative                                                                                                                                                                                                                                             |
-|-----------------------|--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| US-1.1, US-1.3        | Separation of API and Block Servers        | Separating heavy I/O (file blocks) from lightweight requests (login, metadata) prevents resource starvation. It allows the Block Servers to be scaled independently based on bandwidth/CPU needs (compression/encryption). | Monolithic Architecture: Discarded because heavy uploads would block simple metadata queries, leading to poor availability under load.                                                                                                                             |
-| QAS-016               | Service-Side Encryption in Block Server    | Performing encryption in the Block Server (before S3) ensures strict control over encryption keys and process integrity. It satisfies the requirement to store encrypted data.                                              | Client-Side Encryption: Discarded due to trust issues; compromised clients could upload corrupt data. S3 Server-Side Encryption Only: Discarded as it relies wholly on the provider; we need application-level control.                                            |
-| C-1                   | Use Amazon S3                              | Constraint from the Case Study. Provides necessary durability (99.999999999%) and scalability.                                                                                                                             | HDFS / Custom Storage Cluster: Discarded due to high operational complexity and cost compared to managed S3.                                                                                                                                                       |
-
 **Recorded Design Decisions**:
 
 | Driver | Decision | Rationale | Discarded Alternative |
