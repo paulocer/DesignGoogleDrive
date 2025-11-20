@@ -1,217 +1,270 @@
 # LLMIteration-1.md
 
-# Iteration 1: Core System Structure & Basic Data Flow
+## Step 1: Review Iteration Goal and Drivers
 
-## Step 1: Review Inputs
+**Goal:** Establish the global architectural pattern and facilitate the fundamental ability to store and retrieve files securely. This iteration defines the decomposition into major containers (Block Server, API Server, Metadata DB) and handles the interaction with external storage (S3).
 
-**Design Round Purpose**:  
-The purpose of this design round is to produce a structural design that supports the core lifecycle of a file (Upload -> Store -> Download) while strictly adhering to security constraints (Encryption). This will involve defining the high-level decomposition of the system into major containers.
+**Drivers to Address:**
 
-**Primary Drivers for this Iteration**:
+- **User Stories:**
 
-| ID | Driver | Priority | Source |
-|:---|:-------|:---------|:-------|
-| **US-1.1**  | **Simple File Upload**: Users must upload files of any format via drag-and-drop. | **P1** | |
-| **US-1.3**  | **File Retrieval**: Users must download stored files to local devices. | **P1** | |
-| **QAS-016** | **Data Confidentiality at Rest**: All files must be encrypted before storage. | **P1** | |
-| **QAS-017** | **Data Security in Transit**: All transfers must be HTTPS/SSL. | **P1** | |
+	- *US-1.1:* Simple File Upload. (Priority: P1)
+		- Description: Users must be able to upload files of any format via a drag-and-drop interface.
 
-**Relevant Constraints**:
-* **C-1 (Tech Stack)**: Must use Amazon S3 for storage and a Relational Database for metadata.
-* **C-3 (Security)**: Mandatory Encryption at rest and SSL in transit.
+	- *US-1.3:* File Retrieval (Download). (Priority: P1)
+		- Description: Users must be able to download stored files to their local devices.
 
-**Existing Architecture**:
-* We are starting with the **Context Diagram** defined in `LLMArchitecture-0.md`. There are no internal structures defined yet.
+- *Quality Attribute Scenarios:*
 
-## Step 2: Establish Iteration Goal by Selecting Drivers
+	- *QAS-016:* Data Confidentiality at Rest (Encryption). (Priority: P1)
+		- Scenario: The system ensures that all file blocks are encrypted by the Block Servers before being committed to storage.
 
-**Goal**:  
-The goal of this iteration is to decompose the high-level "Google Drive System" into its primary **containers** (functional subsystems). We aim to establish a pattern that separates the handling of large file data (Block Server) from metadata and user management (API Server), while satisfying the requirement for data confidentiality (Encryption) immediately at the entry point.
+	- *QAS-017:* Data Security in Transit. (Priority: P1)
+		- Scenario: The system enforces the use of HTTPS/SSL for all API calls and data transfers to prevent man-in-the-middle attacks.
 
-**Selected Drivers**:
-* **US-1.1**: Simple File Upload.
-* **US-1.3**: File Retrieval (Download).
-* **QAS-016**: Data Confidentiality at Rest (Encryption).
-* **QAS-017**: Data Security in Transit.
+- *Constraints:*
+
+	- *C-1:* Technology Stack. Must use Amazon S3 for storage and a Relational Database for metadata.
+
+	- *C-3:* Security & Data Management. Encryption at rest and HTTPS are mandatory.
+
+***
+
+**Architect's Note:** We are intentionally excluding complex features like synchronization (US-2.x) and resumable uploads (US-1.2) for this iteration. Our focus is purely on the "happy path" of moving data securely between the client and the cloud infrastructure.
+
+***
+
+## Step 2: Establish Goal for the Iteration by Selecting Drivers
+
+**Goal:** Define the foundational architectural style and deployable units required to securely transport data from a user's device to persistent cloud storage and retrieve it. This involves defining the boundaries between the client, the application servers, and the storage infrastructure.
+
+**Rationale for Driver Selection:** We have selected the following drivers because they represent the "Critical Path" for the system. Until we can prove we can securely accept and store a file, no other feature (synchronization, sharing) matters.
+
+**Selected Drivers:**
+
+1. *US-1.1: Simple File Upload*
+	- Why: This defines the primary input for the system. It forces us to decide how data enters the architecture (e.g., via API or direct to storage).
+
+2. *US-1.3: File Retrieval (Download)*
+	- Why: This defines the primary output. It forces us to design the retrieval path and how the client interacts with stored data.
+
+3. *QAS-016: Data Confidentiality at Rest (Encryption)*
+	- Why: This is a P1 security requirement. Addressing it now ensures security is "baked in" to the data flow rather than bolted on later. It impacts component responsibilities (who performs the encryption?).
+
+4. *QAS-017: Data Security in Transit*
+	- Why: This dictates our communication protocols (HTTPS/SSL) and affects interface definitions.
+
+***
+
+**Architect's Note:** By selecting US-1.1 and QAS-016 together, we are acknowledging a critical design trade-off we must face in the next steps: Where does encryption happen? (Client-side vs. Server-side). This decision will fundamentally shape our Component-and-Connector view.
+
+***
 
 ## Step 3: Choose One or More Elements of the System to Refine
 
-**Element to Refine**:  
-We will refine the **Google Drive System** element, which is currently represented as a single "Black Box" in the System Context Diagram.
+**Element to Refine**: The entire **Google Drive System** (currently represented as a black box in the Context Diagram).
 
-**Refinement Strategy**:  
-**Decomposition**. We will break the system down into key containers (Applications and Data Stores) to support the flow of metadata and binary data.
+**Refinement Strategy**:
+
+- **Decomposition**. We will break the monolithic system into distinct subsystems to separate the "Data Plane" (handling heavy file content) from the "Control Plane" (handling metadata and user requests).
+
+**Rationale**: To satisfy **US-1.1 (Upload)** and **QAS-016 (Encryption at Rest)** efficiently, we cannot process heavy file data and lightweight metadata in the same pipeline. The expert analysis suggests separating these concerns to handle the differing resource requirements (CPU/Bandwidth for files vs. IO/Transactional integrity for metadata).
+
+**Sub-Elements to be Defined**: Based on the functional requirements, we expect to identify the following core components during this refinement:
+
+1.  **Client Application**: The interface for the user.
+2.  **Load Balancer**: The entry point for traffic.
+3.  **API Server**: To handle metadata and authentication.
+4.  **Block Server**: A dedicated component to handle file chunking, compression, and encryption.
+5.  **Metadata Database**: To store file revisions and user data.
+
+***
+
+**Architect's Note**: By choosing to decompose the system now, we are preparing to assign specific responsibilities (like encryption QAS-016) to the **Block Server** specifically, rather than overloading the API Server.
+
+***
 
 ## Step 4: Choose One or More Design Concepts That Satisfy the Selected Drivers
 
-**Design Decision 1: Separation of Concerns (Metadata vs. Block Data)**
-* **Decision**: We will separate the system into two distinct service types: **API Servers** for lightweight metadata operations and **Block Servers** for heavy file processing.
-* **Rationale**: This addresses **US-1.1 (Upload)** and **QAS-016 (Encryption)**. File processing (chunking, compression, encryption) is CPU and I/O intensive. Separating it from metadata operations ensures that heavy uploads do not starve user requests for file listings or logins. It also allows independent scaling.
+For this iteration, we have selected the following design concepts to address the upload, download, and security drivers:
 
-**Design Decision 2: Object Storage for Files**
-* **Decision**: Use **Amazon S3** for storing the actual file blocks.
-* **Rationale**: Satisfies **Constraint C-1**. S3 provides the necessary durability and availability for the "Data" part of the system.
+### 1. Service-Based Architecture (Separation of Data and Control Planes)
+* **Description**: We will split the backend into two distinct service types: **API Servers** (Control Plane) and **Block Servers** (Data Plane).
+* **Drivers Addressed**:
+    * **US-1.1 (Upload)**: Allows optimizing servers specifically for heavy I/O and CPU tasks (hashing/encrypting) separate from lightweight user requests.
+    * **QAS-016 (Encryption)**: Centralizes the encryption logic in the Block Server.
+* **Rationale**: Separating concerns allows the system to handle the heavy load of file processing (chunking, compressing, encrypting) without blocking the responsive API endpoints used for metadata.
 
-**Design Decision 3: Relational Database for Metadata**
-* **Decision**: Use a **Relational Database** (e.g., MySQL/PostgreSQL) for storing user and file metadata.
-* **Rationale**: Satisfies **Constraint C-1** and provides ACID properties required for consistency.
+### 2. Block-Based File Storage Strategy
+* **Description**: Files will not be stored as single objects. They will be split into smaller blocks, each with a unique hash.
+* **Drivers Addressed**:
+    * **US-1.1 (Upload)** & **US-1.3 (Download)**.
+* **Rationale**: Breaking files into blocks enables efficient storage in S3 and provides the granular unit required for encryption. It also lays the groundwork for future requirements like Delta Sync (US-2.2) and De-duplication.
 
-**Design Decision 4: Encryption at the Service Layer**
-* **Decision**: Implement encryption logic within the **Block Server** before data is sent to S3.
-* **Rationale**: Satisfies **QAS-016**. While S3 supports server-side encryption, performing it in the Block Server ensures we control the keys and the process before data leaves our compute boundary.
+### 3. Server-Side Encryption (at Block Server)
+* **Description**: The **Block Server** will be responsible for encrypting file blocks before sending them to S3 and decrypting them upon retrieval.
+* **Drivers Addressed**:
+    * **QAS-016 (Data Confidentiality at Rest)**.
+* **Rationale**: Centralizes security logic. While client-side encryption is safer, it makes cross-platform implementation (Web, iOS, Android) error-prone and complex. The case study explicitly identifies moving this logic to Block Servers as the preferred design.
 
-## Step 5: Instantiate Architectural Elements, Allocate Responsibilities, and Define Interfaces
+### 4. HTTPS/SSL Termination at Load Balancer
+* **Description**: All traffic from clients will be encrypted via TLS/SSL, terminated at the entry load balancer.
+* **Drivers Addressed**:
+    * **QAS-017 (Data Security in Transit)**.
+* **Rationale**: Standard industry practice to offload the cryptographic overhead of handshake negotiation from the application servers to the load balancer.
 
-**Instantiation 1: Block Server**
-* **Responsibilities**:
-    * Receive file content from clients.
-    * Split files into blocks.
-    * Compress blocks (Implementation of **QAS-011** - *noted here as part of standard block processing*).
-    * **Encrypt** blocks (Implementation of **QAS-016**).
-    * Upload encrypted blocks to **Amazon S3**.
-* **Relationships**: Connects to Client (Input) and Amazon S3 (Output).
+### Discarded Alternatives
 
-**Instantiation 2: API Server**
-* **Responsibilities**:
-    * Authenticate users (**US-1.1** precondition).
-    * Manage file metadata (name, size, parent folder, version).
-    * Generate/Manage Upload URLs or sessions.
-    * Update **Metadata DB** with new file status.
-* **Relationships**: Connects to Client (Requests) and Metadata DB (Storage).
+| Alternative | Reason for Discarding |
+| :--- | :--- |
+| **Direct Upload to S3 (Pre-signed URLs)** | While this reduces server load, it forces the client to handle chunking, compression, and encryption. As noted in the case study, implementing this sensitive logic across multiple client platforms (Web, iOS, Android) is error-prone and requires significant engineering effort. |
+| **Monolithic Single Server** | Discarded immediately as it violates the scalability and reliability requirements inherent in the project scope (10M DAU). |
 
-**Instantiation 3: Load Balancer**
-* **Responsibilities**:
-    * Distribute incoming HTTPS traffic to appropriate servers (API vs Block) based on URL path or subdomain.
-    * Terminate SSL (**QAS-017**).
-* **Relationships**: Intermediary between Client and Backend Servers.
+***
 
-**Instantiation 4: Metadata Database**
-* **Responsibilities**:
-    * Persist user info, file metadata, and block mappings.
-* **Relationships**: Accessed primarily by API Servers.
+**Architect's Note**:
+The decision to discard "Direct Upload to S3" is the most significant decision in this iteration. It forces us to build the **Block Server**, which increases infrastructure complexity but simplifies client logic and ensures consistent security enforcement.
 
-**Defined Interfaces (Preliminary)**:
-* `I_Upload`: Client -> Block Server (Binary Data Stream over HTTPS).
-* `I_Metadata`: Client -> API Server (JSON over HTTPS).
-* `I_Storage`: Block Server -> Amazon S3 (S3 API/HTTPS).
+***
 
-## Step 6: Sketch Views and Record Design Decisions
+## Step 5: Instantiate Architectural Elements, Sketch Views, Allocate Responsibilities, and Define Interfaces
 
-**Sketch: Container Diagram (C4 Level 2)** This diagram visualizes the decomposition of the "Google Drive System" into its core containers. It highlights the separation between metadata handling and file block processing.
+We have instantiated the following elements to form the **Component-and-Connector** structure of the system.
+
+### 1\. Instantiated Elements & Responsibilities
+
+| Element | Type | Responsibilities | Design Concept / Driver |
+| :--- | :--- | :--- | :--- |
+| **Client Application** | Component | - Initiates upload/download requests.<br>- Handling user interactions. | US-1.1 |
+| **Load Balancer** | Connector | - Distributes traffic.<br>- **SSL Termination** (Decryption of inbound HTTPS traffic). | QAS-017 (Security in Transit) |
+| **API Server** | Component | - Authenticates users.<br>- Manages file **Metadata** (name, size, owner) in the DB.<br>- Updates file status (pending -\> uploaded). | Service-Based Arch |
+| **Block Server** | Component | - Receives file content streams.<br>- **Splits** files into blocks.<br>- **Encrypts** blocks (AES).<br>- Uploads blocks to Cloud Storage. | QAS-016 (Encryption), Block-Based Storage |
+| **Metadata DB** | Component | - Stores user and file metadata relations.<br>- Ensures ACID compliance for metadata updates. | Relational DB Constraint |
+| **Cloud Storage (S3)** | Component | - Persists encrypted file blocks.<br>- Ensures durability and availability. | S3 Constraint |
+
+### 2\. Sketch of the Component-and-Connector View
+
+This diagram illustrates the separation between the Control Plane (API Server) and Data Plane (Block Server).
 
 ```mermaid
 graph TD
-    subgraph "Google Drive System"
-        LB[Load Balancer]
-        API[API Server]
-        Block[Block Server]
-        DB[(Metadata Database)]
+    subgraph "Client Side"
+        Client[Client App]
     end
 
-    subgraph "External Actors"
-        User[User Client]
-        S3[Amazon S3]
-        Glacier[Amazon S3 Glacier]
+    subgraph "DMZ / Network Boundary"
+        LB[Load Balancer<br> SSL Termination ]
     end
 
-    User -- "HTTPS (Metadata Ops)" --> LB
-    User -- "HTTPS (File Data)" --> LB
-    
-    LB -- "Routes /api/*" --> API
-    LB -- "Routes /block/*" --> Block
+    subgraph "Application Layer"
+        API[API Server Cluster<br> Control Plane ]
+        Block[Block Server Cluster<br> Data Plane ]
+    end
 
-    API -- "Read/Write Metadata (SQL)" --> DB
+    subgraph "Data Persistence Layer"
+        DB[ Metadata DB<br>Relational ]
+        S3[ Amazon S3<br>Encrypted Blocks ]
+    end
+
+    Client -- 1. Metadata Req  HTTPS  --> LB
+    LB -- Plain HTTP --> API
+    API -- Read/Write --> DB
     
-    Block -- "Put/Get Encrypted Blocks (HTTPS)" --> S3
-    Block -- "Archive Policies" --> Glacier
+    Client -- 2. File Content  HTTPS  --> LB
+    LB -- Plain HTTP --> Block
+    Block -- 3. Encrypt & Upload --> S3
+    Block -- 4. Status Update --> API
 ```
 
-**Recorded Design Decisions**:
+### 3\. Key Interface Definitions
 
-| Driver | Decision | Rationale | Discarded Alternative |
-|:---|:---|:---|:---|
-| **US-1.1, US-1.3** | **Separation of API and Block Servers** | Separating heavy I/O (file blocks) from lightweight requests (login, metadata) prevents resource starvation. It allows the Block Servers to be scaled independently based on bandwidth/CPU needs (compression/encryption). | **Monolithic Architecture**: Discarded because heavy uploads would block simple metadata queries, leading to poor availability under load. |
-| **QAS-016** | **Service-Side Encryption in Block Server** | Performing encryption in the Block Server (before S3) ensures strict control over encryption keys and process integrity. It satisfies the requirement to store encrypted data. | **Client-Side Encryption**: Discarded due to trust issues; compromised clients could upload corrupt data. **S3-Server Side Encryption Only**: Discarded as it relies wholly on the provider; we need application-level control. |
-| **C-1** | **Use Amazon S3** | Constraint from the Case Study. Provides necessary durability (99.999999999%) and scalability. | **HDFS / Custom Storage Cluster**: Discarded due to high operational complexity and cost compared to managed S3. |
+To satisfy the interaction between these components, we define the following preliminary interfaces:
 
-**Architect's Note:**
-We have now crystallized the architecture. The "Google Drive System" is no longer a black box; it is a coordinated set of services. The diagram clearly shows how we handle the two distinct types of traffic (Metadata vs. Data) to satisfy our primary drivers.
+**I-01: File Metadata API (Provided by API Server)**
 
-## Step 7: Perform Analysis of Current Design and Review Iteration Goal
+  * **Endpoint**: `POST /api/v1/files`
+  * **Input**: `JSON { name: "photo.jpg", size: 1024, parent_folder_id: "xyz" }`
+  * **Output**: `JSON { file_id: "123", upload_status: "pending", upload_token: "abc" }`
+  * **Rationale**: Establishes the file entry in the database before any data is transmitted.
 
-**Analysis of Design**:
-The architecture now consists of a **Split-Service Pattern**.
-1.  **Functionality**: The **API Server** handles metadata, ensuring that `US-1.1` (Simple Upload) and `US-1.3` (Download) have a responsive entry point for authentication and file listing. The **Block Server** handles the heavy lifting, satisfying the throughput needs.
-2.  **Security**: By placing the **Block Server** as the gatekeeper to S3, we enforce **QAS-016** (Encryption). The client cannot write directly to S3, preventing unencrypted data ingress. **QAS-017** (Transit) is enforced via the Load Balancer.
-3.  **Constraints**: The use of S3 and Relational DB satisfies **C-1**.
+**I-02: Block Upload API (Provided by Block Server)**
 
-**Goal Status**:
-The goal of "Establishing Core System Structure" is **Achieved**. We have decomposited the system into deployable containers.
+  * **Endpoint**: `PUT /api/v1/blocks/upload`
+  * **Headers**: `Authorization: Bearer <token>`, `X-File-Id: <file_id>`
+  * **Body**: `Binary Stream (File Content)`
+  * **Rationale**: The actual data transmission channel. The Block Server uses the `X-File-Id` to associate the incoming stream with the metadata created in I-01.
 
-**Driver Status Update**:
+**I-03: Cloud Storage Interface (Provided by S3)**
 
-| Driver | Status | Notes |
-|:---|:---|:---|
-| **US-1.1** (Simple Upload) | **Completely Addressed** | Structure allows upload. Large file logic (Resumable) is next. |
-| **US-1.3** (Download) | **Completely Addressed** | Structure supports retrieval of blocks and metadata. |
-| **QAS-016** (Encryption) | **Completely Addressed** | Encryption layer defined in Block Server. |
-| **QAS-017** (Transit Security) | **Completely Addressed** | LB/SSL Termination defined. |
+  * **Method**: `S3.PutObject`
+  * **Input**: `BucketName, Key (Hash), Body (EncryptedBytes)`
+  * **Rationale**: Standard AWS SDK interface.
 
----
+***
+
+**Architect's Note**:
+A key allocation decision here is that the **Block Server** must communicate back to the **API Server** (or DB directly) to update the status of a file from "pending" to "uploaded" once S3 confirms storage. We have modeled this as `Block -- 4. Status Update --> API` in the sketch to keep the Block Server stateless regarding business logic.
+
+***
 
 # LLMIteration-1.md
 
-# Iteration 1: Core System Structure & Basic Data Flow
+## Step 6: Record Design Decisions
 
-## Step 1: Review Inputs
+We have documented the following design decisions in the Architecture document:
 
-**Design Round Purpose**:  
-The purpose of this design round is to produce a structural design that supports the core lifecycle of a file (Upload -> Store -> Download) while strictly adhering to security constraints (Encryption).
+### 1. Architectural Patterns
 
-**Primary Drivers**:
-* **US-1.1**: Simple File Upload (P1).
-* **US-1.3**: File Retrieval (P1).
-* **QAS-016**: Data Confidentiality at Rest (P1).
-* **QAS-017**: Data Security in Transit (P1).
+| Decision | Driver | Rationale | Discarded Alternative |
+| :--- | :--- | :--- | :--- |
+| **Separation of Control and Data Planes (API Server vs. Block Server)** | **US-1.1** (Upload), **QAS-009** (Throughput) | Separation allows independent scaling. Block Servers require high CPU (compression/encryption) and network bandwidth, while API servers handle lightweight transactional metadata requests. | **Monolithic Architecture**: Discarded as it cannot scale specific resources (e.g., CPU for encryption) independently of others. |
 
-**Constraints**:
-* **C-1**: Tech Stack (S3, RDBMS).
+### 2. Data Management & Storage
 
-## Step 2: Establish Iteration Goal by Selecting Drivers
+| Decision | Driver | Rationale | Discarded Alternative |
+| :--- | :--- | :--- | :--- |
+| **Block-Based File Storage** | **US-1.1**, **US-2.2** (Future Delta Sync) | Splitting files into blocks allows for granular encryption, parallel uploads, and is a prerequisite for efficient delta synchronization and de-duplication in future iterations. | **Whole File Storage**: Discarded because it makes delta sync inefficient (re-uploading entire files for small changes). |
 
-**Goal**:  
-Decompose the high-level system into primary containers to separate large file processing from metadata management.
+### 3. Security Decisions
 
-## Step 3: Choose One or More Elements of the System to Refine
+| Decision | Driver | Rationale | Discarded Alternative |
+| :--- | :--- | :--- | :--- |
+| **Server-Side Encryption (in Block Server)** | **QAS-016** (Confidentiality), **US-1.1** | Centralizing encryption in the Block Server ensures consistent security enforcement across all client platforms (Web, iOS, Android) without relying on client implementation correctness. | **Client-Side Encryption**: Discarded to reduce engineering effort and the risk of implementation errors across different client platforms. |
+| **Block Server Proxy Upload (No Direct S3 Access)** | **US-1.1**, **QAS-016** | To support server-side chunking, compression, and encryption, the data must pass through our Block Servers. Direct S3 upload would bypass this processing logic. | **Direct Upload to S3 (Pre-signed URLs)**: Discarded because it would force the heavy logic (chunking/encrypting) onto the client, complicating the client app significantly. |
 
-**Element**: Google Drive System (System Context).
-**Strategy**: Decomposition into Containers.
+### 4. Integration & Communication
 
-## Step 4: Choose One or More Design Concepts That Satisfy the Selected Drivers
+| Decision | Driver | Rationale | Discarded Alternative |
+| :--- | :--- | :--- | :--- |
+| **HTTPS/SSL Termination at Load Balancer** | **QAS-017** (Security in Transit) | Offloads CPU-intensive cryptographic handshake operations from the application servers to the specialized load balancer infrastructure. | **SSL Termination at App Server**: Discarded to preserve App Server CPU cycles for business logic and file processing. |
 
-**Design Decision 1: Separation of Concerns (Metadata vs. Block Data)**
-* **Decision**: Separate API Servers (Metadata) and Block Servers (Data).
-* **Rationale**: prevents resource starvation during heavy uploads.
+***
 
-**Design Decision 2: Object Storage**
-* **Decision**: Use Amazon S3.
-* **Rationale**: Satisfies C-1 and provides durability.
+**Architect's Note**:
+The decision to route file data through **Block Servers** rather than allowing clients to upload directly to S3 is a major trade-off. We are accepting higher infrastructure costs (running fleet of Block Servers) in exchange for thinner clients and centralized control over compression and encryption.
 
-**Design Decision 3: Encryption Service**
-* **Decision**: Encrypt in Block Server before S3 write.
-* **Rationale**: Satisfies QAS-016 with application-controlled keys.
+***
 
-## Step 5: Instantiate Architectural Elements
+## Step 7: Perform Analysis of Current Design and Review Iteration Goal
 
-* **Block Server**: Handling chunking, compression, encryption, S3 interaction.
-* **API Server**: Handling Auth, Metadata, DB interaction.
-* **Load Balancer**: SSL termination, Routing.
-* **Metadata DB**: Storing file/user info.
+### 1\. Design Analysis
 
-## Step 6: Sketch Views and Record Design Decisions
+We have reviewed the **Component-and-Connector** structure and the **Design Decisions** against the selected drivers.
 
-*See Container Diagram in LLMArchitecture-1.md*
+| Driver | Status | Analysis |
+| :--- | :--- | :--- |
+| **US-1.1 (Simple Upload)** | **Addressed** | The architecture successfully defines the path for file ingestion. The **Client** initiates metadata creation via the **API Server**, then streams data to the **Block Server**. The Block Server handles the heavy lifting (chunking/hashing), satisfying the requirement to handle files while keeping the API layer responsive. |
+| **US-1.3 (File Download)** | **Addressed** | The retrieval path is defined. The **Client** fetches metadata (Block list/order) from the **API Server**, then requests specific blocks from the **Block Server**, which retrieves them from **S3**, decrypts them, and streams them back. |
+| **QAS-016 (Encryption at Rest)** | **Addressed** | Security is enforced by the **Block Server**. By funneling all writes through this component, we ensure no file block ever touches **S3** in plaintext. This satisfies the P1 security constraint. |
+| **QAS-017 (Security in Transit)** | **Addressed** | The **Load Balancer** is designated as the SSL Termination point. This ensures all external traffic is encrypted (HTTPS) without burdening the internal application servers with handshake overhead. |
 
-## Step 7: Perform Analysis of Current Design
+### 2\. Iteration Goal Review
 
-The split architecture successfully addresses the drivers. All selected drivers for this iteration are marked as **Completely Addressed**.
+  * **Goal**: Establish global architectural pattern and secure file storage/retrieval.
+  * **Outcome**: **Achieved**. We have a defined structure (Service-Based), identified the core deployable units (API, Block, DB, S3), and established the security boundaries.
+
+### 3\. Next Steps
+
+The foundation is stable. We can now proceed to **Iteration 2**, where we will tackle the complexity of **Synchronization** and **Consistency**, knowing that the basic "Pipe" for moving data is already designed.
+
+***
