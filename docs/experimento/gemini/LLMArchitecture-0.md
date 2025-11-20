@@ -134,7 +134,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     %% Empty placeholder for US-1.3 sequence
-	```
+```
 
 #### QAS-016: Data Confidentiality at Rest (Encryption)
 
