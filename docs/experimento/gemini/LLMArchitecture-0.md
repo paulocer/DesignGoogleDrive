@@ -19,336 +19,307 @@
 
 ## 1. Introduction
 
-This document provides a comprehensive architectural overview of the Google Drive-like file storage and synchronization system. It details the design decisions, architectural patterns, and structural views (Module, Component-and-Connector, and Allocation) required to satisfy the functional requirements and quality attributes. The system is designed to handle large-scale file operations, real-time synchronization across devices, and secure data storage for 10 million Daily Active Users.
+This document defines the software architecture for the Google Drive-like system, a scalable file storage and synchronization service. It provides a comprehensive technical blueprint, detailing the system's structure, behavior, and deployment. This document is intended for software engineers, DevOps engineers, and stakeholders to understand the architectural decisions, the decomposition of the system into components, and how these components interact to satisfy the functional requirements (User Stories) and non-functional requirements (Quality Attribute Scenarios) defined in the project scope.
 
 ## 2. Context Diagram
 
-The following diagram illustrates the system boundaries and its interactions with external entities. It highlights the "Google Drive System" as the central black box, interacting with Users, Cloud Storage Providers (S3, Glacier), and Notification Services to fulfill its responsibilities.
+The following diagram illustrates the system context for the Google Drive System. It depicts the boundaries of the system and its interactions with external entities (Actors), including the end-users and third-party infrastructure services required for storage (Amazon S3, Glacier) and notifications (Push Service).
 
 ### Diagram
 
 ```mermaid
 graph TD
- subgraph "Case Study System"
- System[Google Drive System]
- end
+    subgraph "Case Study System"
+        System[Google Drive System]
+    end
 
- subgraph "External Actors"
- User[User]
- S3[Cloud Storage Provider<br> Amazon S3]
- Glacier[Cold Storage Provider<br> Amazon S3 Glacier]
- Push[Push Notification Service]
- end
+    subgraph "External Actors"
+        User[User]
+        S3[Cloud Storage Provider<br> Amazon S3]
+        Glacier[Cold Storage Provider<br> Amazon S3 Glacier]
+        Push[Push Notification Service]
+    end
 
- User -- "Uploads, downloads, syncs & shares files" --> System
- System -- "Stores & retrieves encrypted file blocks" --> S3
- System -- "Archives inactive/cold data" --> Glacier
- System -- "Delivers mobile alerts" --> Push
+    User -- "Uploads, downloads, syncs & shares files" --> System
+    System -- "Stores & retrieves encrypted file blocks" --> S3
+    System -- "Archives inactive/cold data" --> Glacier
+    System -- "Delivers mobile alerts" --> Push
 ```
 	
 ### External Actors	
 
-| Actor | Description |
-| --- | --- |
-| User | The primary user of the system who accesses Google Drive via web browsers or mobile applications to upload, download, synchronize, and share files. They initiate file operations and resolve sync conflicts. |
-| Cloud Storage Provider (Amazon S3) | An external object storage service used to store active file blocks securely. It provides high availability, scalability, and same-region or cross-region replication for data durability. |
-| Cold Storage Provider (Amazon S3 Glacier) | An external storage service optimized for data archiving. The system moves infrequently used data (cold data) here to reduce storage costs while maintaining data retention. |
-| Push Notification Service | An external infrastructure service (e.g., APNS, FCM) used to deliver real-time notifications to user mobile devices when files are added, edited, or shared. |
+| Actor                                     | Description                                                                                                                                                       |
+|-------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| User                                      | The primary user of the system who accesses Google Drive via web browsers or mobile applications to upload, download, synchronize, and share files.              |
+| Cloud Storage Provider (Amazon S3)        | An external object storage service used to store active file blocks securely. It provides high availability, scalability, and replication.                        |
+| Cold Storage Provider (Amazon S3 Glacier) | An external storage service optimized for data archiving. The system moves infrequently used data here to reduce costs.                                           |
+| Push Notification Service                 | An external infrastructure service (e.g., APNS, FCM) used to deliver real-time notifications to user mobile devices.                                              |
 
 ## 3. Architectural Drivers
 
+This section summarizes the driving requirements for the architecture, derived from the expert analysis of the case study.
+
 ### User Story Priorities
 
-| ID      | User Story Name                      | Priority | Rationale                                                                                      |
-|---------|--------------------------------------|----------|-------------------------------------------------------------------------------------------------|
-| US-1.1  | Simple File Upload                   | P1       | Core functional requirement. The system is useless without the ability to ingest data.       |
-| US-1.2  | Resumable Upload for Large Files     | P1       | Required to satisfy the 10 GB file size limit and ensure reliability over unstable networks. |
-| US-1.3  | File Retrieval (Download)            | P1       | Core functional requirement. Users must be able to retrieve their data.                         |
-| US-2.1  | Multi-Device Synchronization         | P1       | Defining feature. Essential for the "access from any device" value proposition.       |
-| US-2.2  | Bandwidth Efficient Sync (Delta Sync)| P1       | Critical for Performance Efficiency and User Experience.                                        |
-| US-2.3  | Conflict Resolution                  | P1       | Mandatory due to the Strong Consistency constraint.                                             |
-| US-3.1  | File Revision History                | P2       | Secondary to current-state storage, provides recovery capability.                               |
-| US-3.2  | File Sharing                         | P2       | Key collaboration feature, but secondary to personal storage utility.                           |
-| US-3.3  | Activity Notifications               | P1       | Essential technical enabler for Synchronization.                                                |
+| ID      | User Story Name          | Priority | Description                                                      |
+|---------|--------------------------|----------|------------------------------------------------------------------|
+| US-1.1  | Simple File Upload       | P1       | Core capability to upload files (drag-and-drop, any format).     |
+| US-1.2  | Resumable Upload         | P1       | Handling large file uploads (up to 10GB) with resume capability. |
+| US-1.3  | File Retrieval           | P1       | Downloading files to local devices.                              |
+| US-2.1  | Multi-Device Sync        | P1       | Automatic propagation of file changes across devices.            |
+| US-2.2  | Bandwidth Efficient Sync | P1       | Delta synchronization to transfer only modified blocks.          |
+| US-2.3  | Conflict Resolution      | P1       | Handling concurrent edits with a "first wins" strategy.          |
+| US-3.1  | File Revision History    | P2       | Viewing and restoring previous file versions.                    |
+| US-3.2  | File Sharing             | P2       | Sharing files with specific users.                               |
+| US-3.3  | Activity Notifications   | P1       | Alerts for file edits, deletions, or shares.                     |
 
 ### Quality Attribute Scenario Priorities
 
-| ID       | Scenario Name                                    | Attribute    | Priority |
-|----------|--------------------------------------------------|--------------|----------|
-| QAS-001  | Storage Node Hardware Failure                    | Reliability  | P1       |
-| QAS-002  | Regional Data Center Outage                      | Reliability  | P1       |
-| QAS-003  | Network Interruption During Large File Upload    | Reliability  | P1       |
-| QAS-004  | Web/API Server Failure                           | Availability | P1       |
-| QAS-005  | Metadata Database Master Failure                 | Availability | P1       |
-| QAS-006  | High Traffic Surge                               | Availability | P1       |
-| QAS-007  | User Base Growth to 50 Million                   | Scalability  | P1       |
-| QAS-008  | Massive Data Accumulation (500 PB)               | Scalability  | P1       |
-| QAS-009  | Handling Peak Throughput                         | Scalability  | P1       |
-| QAS-010  | Delta Synchronization                            | Performance  | P1       |
-| QAS-011  | Data Compression                                 | Performance  | P2       |
-| QAS-012  | Sync Speed / Update Latency                      | Performance  | P1       |
-| QAS-013  | Cache Invalidation on Write                      | Consistency  | P1       |
-| QAS-014  | Concurrent Edit Conflict Resolution              | Consistency  | P1       |
-| QAS-015  | ACID Transaction Integrity                       | Consistency  | P1       |
-| QAS-016  | Data Confidentiality at Rest                     | Security     | P1       |
-| QAS-017  | Data Security in Transit                         | Security     | P1       |
-| QAS-018  | Unauthorized Access Control                      | Security     | P1       |
+| ID       | Scenario Name                           | Quality Attribute    | Priority |
+|----------|-----------------------------------------|----------------------|----------|
+| QAS-001  | Storage Node Hardware Failure           | Reliability          | P1       |
+| QAS-002  | Regional Data Center Outage             | Reliability          | P1       |
+| QAS-003  | Network Interruption (Upload)           | Reliability          | P1       |
+| QAS-004  | Web/API Server Failure                  | Availability         | P1       |
+| QAS-005  | Metadata DB Master Failure              | Availability         | P1       |
+| QAS-006  | High Traffic Surge                      | Availability         | P1       |
+| QAS-007  | User Base Growth to 50M                 | Scalability          | P1       |
+| QAS-008  | Massive Data Accumulation (500 PB)      | Scalability          | P1       |
+| QAS-009  | Handling Peak Throughput                | Scalability          | P1       |
+| QAS-010  | Delta Synchronization                   | Perf. Efficiency     | P1       |
+| QAS-011  | Data Compression                        | Perf. Efficiency     | P2       |
+| QAS-012  | Sync Speed / Update Latency             | Perf. Efficiency     | P1       |
+| QAS-013  | Cache Invalidation on Write             | Data Consistency     | P1       |
+| QAS-014  | Concurrent Edit Conflict Resolution     | Data Consistency     | P1       |
+| QAS-015  | ACID Transaction Integrity              | Data Consistency     | P1       |
+| QAS-016  | Data Confidentiality at Rest            | Security             | P1       |
+| QAS-017  | Data Security in Transit                | Security             | P1       |
+| QAS-018  | Unauthorized Access Control             | Security             | P1       |
 
 ### Architectural Constraints
 
-| ID   | Constraint        | Description                                                                                     |
-|------|-------------------|-------------------------------------------------------------------------------------------------|
-| C-1  | Technology Stack  | Must use Amazon S3, S3 Glacier, Relational Database, and Long Polling.                          |
-| C-2  | Business Rules    | Max file size 10GB, 10GB free space per user, Google Doc editing out of scope.                  |
-| C-3  | Security & Data   | Encryption at rest (S3), HTTPS/SSL in transit, Strong Consistency required.                     |
+| ID   | Constraint             | Description                                                                            |
+|------|------------------------|----------------------------------------------------------------------------------------|
+| C-1  | Technology Stack       | Must use Amazon S3, S3 Glacier, Relational DB (ACID), and Long Polling.                |
+| C-2  | Business Rules         | Max file size 10GB; 10GB free space/user; Google Doc editing is out of scope.          |
+| C-3  | Security & Consistency | Encryption at rest; HTTPS/SSL in transit; Strong Consistency required.                 |
 
 ## 4. Views of the module viewtype
 
-This section is currently empty. It will include detailed views of the module viewtype in future iterations.
+This section will include detailed views of the module viewtype. Include diagrams that use the different architectural styles for the module viewtype, as described in the book Documenting Software Architectures: Views and Beyond, 2nd Edition.
 
 ## 5. Views of the component-and-connector viewtype
 
-This section is currently empty. It will include detailed views of the component-and-connector viewtype in future iterations.
+This section will include detailed views of the component-and-connector viewtype. Include diagrams that use the different architectural styles for the component-and-connector viewtype, as described in the book Documenting Software Architectures: Views and Beyond, 2nd Edition.
 
 ## 6. Views of the allocation viewtype
 
-This section is currently empty. It will include detailed views of the allocation viewtype in future iterations.
+This section will include detailed views of the allocation viewtype. Include diagrams that use the different architectural styles for the allocation viewtype, as described in the book Documenting Software Architectures: Views and Beyond, 2nd Edition.
 
 ## 7. Sequence Diagrams
 
-### Iteration 1 Drivers
+This section details the dynamic behavior of the system for the critical User Stories and Quality Attribute Scenarios identified in the Iteration Plan.
+
+### 7.1 Iteration 1 Drivers (Core Structure)
 
 #### US-1.1: Simple File Upload
 
+```mermaid
 sequenceDiagram
-    participant User
-    participant System
+    %% Empty placeholder for US-1.1 sequence
+```
 
 #### US-1.3: File Retrieval (Download)
 
+```mermaid
 sequenceDiagram
-    participant User
-    participant System
+    %% Empty placeholder for US-1.3 sequence
+	```
 
 #### QAS-016: Data Confidentiality at Rest (Encryption)
 
+```mermaid
 sequenceDiagram
-    participant System
-    participant Storage
+    %% Empty placeholder for QAS-016 sequence
+```
 
 #### QAS-017: Data Security in Transit
 
-Snippet de código
-
+```mermaid
 sequenceDiagram
-    participant Client
-    participant System
+    %% Empty placeholder for QAS-017 sequence
+```
 
-### Iteration 2 Drivers
+### 7.2 Iteration 2 Drivers (Sync & Consistency)
 
 #### US-2.1: Multi-Device Synchronization
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant DeviceA
-    participant System
-    participant DeviceB
+    %% Empty placeholder for US-2.1 sequence
+```
 
-#### US-2.2: Bandwidth Efficient Sync (Delta Sync)
+#### US-2.2 / QAS-010: Bandwidth Efficient Sync (Delta Sync)
 
-Snippet de código
-
+```mermaid
 sequenceDiagram
-    participant Client
-    participant System
+    %% Empty placeholder for US-2.2/QAS-010 sequence
+```
 
 #### US-2.3: Conflict Resolution
 
-Snippet de código
-
+```mermaid
 sequenceDiagram
-    participant UserA
-    participant System
-    participant UserB
+    %% Empty placeholder for US-2.3/QAS-014 sequence
+```
 
 #### US-3.3: Activity Notifications
 
-Snippet de código
-
+```mermaid
 sequenceDiagram
-    participant System
-    participant NotificationService
-    participant Client
-
-#### QAS-010: Delta Synchronization (Bandwidth Optimization)
-
-Snippet de código
-
-sequenceDiagram
-    participant Client
-    participant System
+    %% Empty placeholder for US-3.3 sequence
+```
 
 #### QAS-012: Sync Speed / Update Latency
 
-Snippet de código
-
+```mermaid
 sequenceDiagram
-    participant Client
-    participant System
+    %% Empty placeholder for QAS-012 sequence
+```
 
 #### QAS-013: Cache Invalidation on Write
 
-Snippet de código
-
+```mermaid
 sequenceDiagram
-    participant API
-    participant DB
-    participant Cache
+    %% Empty placeholder for QAS-013 sequence
+```
 
-#### QAS-014: Concurrent Edit Conflict Resolution
+### 7.3 Iteration 3 Drivers (Reliability & Scale)
 
-Snippet de código
+#### US-1.2 / QAS-003: Resumable Upload for Large Files
 
+```mermaid
 sequenceDiagram
-    participant User1
-    participant System
-    participant User2
-
-### Iteration 3 Drivers
-
-#### US-1.2: Resumable Upload for Large Files
-
-Snippet de código
-
-sequenceDiagram
-    participant Client
-    participant System
+    %% Empty placeholder for US-1.2/QAS-003 sequence
+```
 	
 #### QAS-001: Storage Node Hardware Failure
 
-Snippet de código
-
+```mermaid
 sequenceDiagram
-    participant System
-    participant S3
+    %% Empty placeholder for QAS-001 sequence
+```
 	
 #### QAS-002: Regional Data Center Outage
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant System
-    participant S3_Region1
-    participant S3_Region2
-	
-#### QAS-003: Network Interruption During Large File Upload
-
-Snippet de código
-
-sequenceDiagram
-    participant Client
-    participant System
+    %% Empty placeholder for QAS-002 sequence
+```
 	
 #### QAS-004: Web/API Server Failure
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant LB
-    participant APIServer
+    %% Empty placeholder for QAS-004 sequence
+```
 	
 #### QAS-005: Metadata Database Master Failure
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant System
-    participant DB_Master
-    participant DB_Slave
+    %% Empty placeholder for QAS-005 sequence
+```
 	
-#### QAS-006: High Traffic Surge
+#### QAS-006 / QAS-009: High Traffic Surge & Peak Throughput
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant Traffic
-    participant Autoscaler
-    participant Servers
+    %% Empty placeholder for QAS-006/QAS-009 sequence
+```
 	
 #### QAS-007: User Base Growth to 50 Million
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant UserBase
-    participant System
+    %% Empty placeholder for QAS-007 sequence
+```
 	
-#### QAS-008: Massive Data Accumulation (500 PB)
+#### QAS-008: Massive Data Accumulation
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant Data
-    participant ShardedDB
+    %% Empty placeholder for QAS-008 sequence
+```
 	
-#### QAS-009: Handling Peak Throughput
-
-Snippet de código
-
-sequenceDiagram
-    participant Requests
-    participant LB
-    participant Servers
-	
-### Iteration 4 Drivers
+### 7.4 Iteration 4 Drivers (Security & Optimization)
 
 #### US-3.1: File Revision History
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant User
-    participant System
+    %% Empty placeholder for US-3.1 sequence
+```
 	
 #### US-3.2: File Sharing
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant Owner
-    participant System
-    participant Recipient
+    %% Empty placeholder for US-3.2 sequence
+```
 	
 #### QAS-011: Data Compression
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant System
-    participant Compressor
+    %% Empty placeholder for QAS-011 sequence
+```
 	
 #### QAS-015: ACID Transaction Integrity
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant System
-    participant DB
+    %% Empty placeholder for QAS-015 sequence
+```
 	
 #### QAS-018: Unauthorized Access Control
 
 Snippet de código
 
+```mermaid
 sequenceDiagram
-    participant User
-    participant AuthSystem
+    %% Empty placeholder for QAS-018 sequence
+```
 
 ## 8. Interfaces
 
-This section is currently empty. It will include details about contracts in future iterations.
+(Section currently empty).
 
 ## 9. Design Decisions
+
+This section describes the relevant design decisions that resulted in this design.
 
 | Driver | Decision | Rationale | Discarded Alternative |
 |--------|----------|-----------|-----------------------|
