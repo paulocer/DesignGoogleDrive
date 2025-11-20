@@ -128,24 +128,24 @@ graph TD
     end
 
     subgraph "DMZ / Network Boundary"
-        LB[Load Balancer<br>(SSL Termination)]
+        LB[Load Balancer<br>SSL Termination]
     end
 
     subgraph "Application Layer"
-        API[API Server Cluster<br>(Control Plane)]
-        Block[Block Server Cluster<br>(Data Plane)]
+        API[API Server Cluster<br> Control Plane]
+        Block[Block Server Cluster<br> Data Plane]
     end
 
     subgraph "Data Persistence Layer"
-        DB[(Metadata DB<br>Relational)]
-        S3[(Amazon S3<br>Encrypted Blocks)]
+        DB[Metadata DB<br>Relational]
+        S3[Amazon S3<br>Encrypted Blocks]
     end
 
-    Client -- 1. Metadata Req (HTTPS) --> LB
+    Client -- 1. Metadata Req HTTPS --> LB
     LB -- Plain HTTP --> API
     API -- Read/Write --> DB
     
-    Client -- 2. File Content (HTTPS) --> LB
+    Client -- 2. File Content HTTPS --> LB
     LB -- Plain HTTP --> Block
     Block -- 3. Encrypt & Upload --> S3
     Block -- 4. Status Update --> API
@@ -186,24 +186,24 @@ sequenceDiagram
     participant DB as Metadata DB
 
     Note over Client, DB: Phase 1: Metadata Initialization
-    Client->>LB: POST /files (metadata)
+    Client->>LB: POST /files metadata
     LB->>API: Forward Request
-    API->>DB: INSERT file (status="pending")
+    API->>DB: INSERT file status="pending"
     DB-->>API: file_id
     API-->>Client: upload_token, file_id
 
     Note over Client, DB: Phase 2: Data Upload
-    Client->>LB: PUT /blocks (content)
+    Client->>LB: PUT /blocks content
     LB->>Block: Forward Stream
     loop Chunking & Encryption
         Block->>Block: Split into blocks
-        Block->>Block: Compress & Encrypt (AES)
-        Block->>S3: PutObject (Encrypted Block)
+        Block->>Block: Compress & Encrypt AES
+        Block->>S3: PutObject Encrypted Block
         S3-->>Block: Ack
     end
 
     Note over Client, DB: Phase 3: Finalization
-    Block->>API: Update Status (uploaded)
+    Block->>API: Update Status uploaded
     API->>DB: UPDATE file SET status="uploaded"
     Block-->>Client: 200 OK
 ```
@@ -223,12 +223,12 @@ sequenceDiagram
     LB->>API: Forward Request
     API->>DB: SELECT blocks FROM file_map
     DB-->>API: List of Block IDs & Hashes
-    API-->>Client: Metadata (Block List)
+    API-->>Client: Metadata Block List
 
     loop For each Block
         Client->>LB: GET /blocks/{block_id}
         LB->>Block: Forward Request
-        Block->>S3: GetObject (Encrypted)
+        Block->>S3: GetObject Encrypted
         S3-->>Block: Encrypted Stream
         Block->>Block: Decrypt & Decompress
         Block-->>Client: Plaintext Block Stream
