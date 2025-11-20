@@ -154,8 +154,6 @@ sequenceDiagram
 
 #### US-2.1: Multi-Device Synchronization
 
-Snippet de código
-
 ```mermaid
 sequenceDiagram
     %% Empty placeholder for US-2.1 sequence
