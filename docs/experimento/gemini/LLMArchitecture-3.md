@@ -126,7 +126,7 @@ This section summarizes the driving requirements for the architecture, derived f
 This view illustrates the separation of the system into a **Control Plane** (handling metadata and user interactions) and a **Data Plane** (handling file content processing). This separation is critical for scaling the CPU-intensive encryption tasks independently of the IO-intensive metadata tasks.
 
 <p align="center">
-  <img src="docs/experimento/gemini/distributed_system_architecture.jpg" alt="Figure 1: Distributed System Architecture"/>
+  <img src="./distributed_system_architecture.jpg" alt="Distributed System Architecture"/>
 </p>
 
 ```mermaid
