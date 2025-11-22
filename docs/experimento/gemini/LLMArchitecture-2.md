@@ -21,7 +21,7 @@
 
 This document defines the software architecture for the Google Drive-like system, a scalable file storage and synchronization service. It provides a comprehensive technical blueprint, detailing the system's structure, behavior, and deployment. This document is intended for software engineers, DevOps engineers, and stakeholders to understand the architectural decisions, the decomposition of the system into components, and how these components interact to satisfy the functional requirements (User Stories) and non-functional requirements (Quality Attribute Scenarios) defined in the project scope.
 
-This version includes the core storage logic (Iteration 1).
+This version includes the core storage logic (Iteration 1) and the synchronization/consistency subsystems (Iteration 2).
 
 ## 2. Context Diagram
 
@@ -109,9 +109,11 @@ This section summarizes the driving requirements for the architecture, derived f
 **Key Priorities for Current Architecture:**
 
   * **US-1.1**: Simple File Upload (P1)
-  * **US-1.3**: File Retrieval (P1)
-  * **QAS-016**: Data Confidentiality at Rest (P1)
-  * **QAS-017**: Data Security in Transit (P1)
+  * **US-2.1**: Multi-Device Synchronization (P1)
+  * **US-2.2**: Delta Sync (P1)
+  * **US-2.3**: Conflict Resolution (P1)
+  * **QAS-012**: Sync Speed (P1)
+  * **QAS-014**: Concurrent Edit Conflict Resolution (P1)
 
 ## 4. Views of the module viewtype
 
@@ -119,50 +121,58 @@ This section summarizes the driving requirements for the architecture, derived f
 
 ## 5. Views of the component-and-connector viewtype
 
-### 5.1 Core System Decomposition (Service-Based Architecture)
+### 5.1 System Decomposition (Sync & Notification Enabled)
 
-This view illustrates the separation of the system into a **Control Plane** (handling metadata and user interactions) and a **Data Plane** (handling file content processing). This separation is critical for scaling the CPU-intensive encryption tasks independently of the IO-intensive metadata tasks.
+This view extends the previous architecture by adding the **Notification Service** and **Message Queue** to handle the "Control Plane" events.
 
 ```mermaid
 graph TD
     subgraph "Client Side"
-        Client[Client App]
+        Client["Client App<br>\(Sync Agent\)"]
     end
 
     subgraph "DMZ / Network Boundary"
-        LB[Load Balancer<br>SSL Termination]
+        LB["Load Balancer<br>\(SSL Termination\)"]
     end
 
     subgraph "Application Layer"
-        API[API Server Cluster<br> Control Plane]
-        Block[Block Server Cluster<br> Data Plane]
+        API["API Server Cluster<br>\(Sync & Metadata\)"]
+        Block["Block Server Cluster<br>\(Encryption & Storage\)"]
+        Notif["Notification Service<br>\(Long Polling\)"]
+        Queue["Message Queue<br>\(Pub/Sub\)"]
     end
 
     subgraph "Data Persistence Layer"
-        DB[Metadata DB<br>Relational]
-        S3[Amazon S3<br>Encrypted Blocks]
+        DB[Metadata DB<br>Versioning Enabled]
+        S3[Amazon S3]
     end
 
-    Client -- 1. Metadata Req HTTPS --> LB
-    LB -- Plain HTTP --> API
-    API -- Read/Write --> DB
+    %% File Data Flow
+    Client -- HTTPS --> LB
+    LB --> Block
+    Block --> S3
+
+    %% Metadata & Sync Flow
+    LB --> API
+    API --> DB
     
-    Client -- 2. File Content HTTPS --> LB
-    LB -- Plain HTTP --> Block
-    Block -- 3. Encrypt & Upload --> S3
-    Block -- 4. Status Update --> API
+    %% Notification Flow
+    API -- "File Updated" --> Queue
+    Queue --> Notif
+    Client -- "Long Poll \(Hold\)" --> LB
+    LB --> Notif
+    Notif -- "Push Event" --> Client
 ```
 
-#### Component Responsibilities
+#### Component Responsibilities (Updated)
 
 | Component | Responsibilities |
 | :--- | :--- |
-| **Client Application** | Initiates upload/download requests; handles user interactions. |
-| **Load Balancer** | Distributes traffic; performs **SSL Termination** to satisfy QAS-017. |
-| **API Server** | Authenticates users; manages file **Metadata** (name, size, owner); orchestrates status updates. |
-| **Block Server** | Receives file streams; **Splits** files into blocks; **Encrypts** blocks (QAS-016); Uploads to S3. |
-| **Metadata DB** | Stores relational data (User, File, Block mappings); ensures ACID compliance. |
-| **Cloud Storage (S3)** | Persists encrypted file blocks; ensures high durability. |
+| **API Server** | Authenticates users; **Calculates Deltas**; **Checks Versions** (Optimistic Locking); Publishes events to Queue. |
+| **Notification Service** | Manages **Long Polling** connections; Delivers real-time events to clients. |
+| **Message Queue** | Decouples API Server (Write) from Notification Service (Push). |
+| **Metadata DB** | Stores file metadata, **Block Hashes**, and **Version Numbers**. |
+| **Client (Sync Agent)** | Maintains local DB; Calculates local block hashes; Initiates Long Poll; Handles 409 Conflicts. |
 
 ## 6. Views of the allocation viewtype
 
@@ -172,7 +182,7 @@ graph TD
 
 This section details the dynamic behavior of the system for the critical User Stories and Quality Attribute Scenarios identified in the Iteration Plan.
 
-### 7.1 Iteration 1 Drivers (Core Structure)
+### 7.1 Iteration 2 Drivers (Sync & Consistency)
 
 #### US-1.1: Simple File Upload
 
@@ -235,6 +245,83 @@ sequenceDiagram
         Block->>Block: Decrypt & Decompress
         Block-->>Client: Plaintext Block Stream
     end
+```
+
+#### US-2.1 & US-3.3: Notification & Pull
+
+This sequence shows how Device B gets updated when Device A writes.
+
+```mermaid
+sequenceDiagram
+    participant DeviceB
+    participant Notif as Notification Svc
+    participant Queue
+    participant API
+    
+    Note over DeviceB: Long Poll Established
+    DeviceB->>Notif: GET /poll (timeout=60s)
+    Notif->>Notif: Hold Connection...
+
+    Note over API: Device A updates File X
+    API->>Queue: Publish "File X Changed"
+    Queue->>Notif: Consume Event
+    
+    Note over Notif: Release Hold
+    Notif-->>DeviceB: 200 OK { file_id: "X", type: "update" }
+    
+    DeviceB->>API: GET /files/X (Pull Metadata)
+    API-->>DeviceB: New Metadata
+```
+
+#### US-2.2: Delta Sync Upload (Bandwidth Optimization)
+
+This sequence shows how the client avoids uploading the full file.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant Block
+    participant DB
+
+    Client->>Client: Calc Block Hashes [H1, H2, H3]
+    Client->>API: POST /sync (ver=5, hashes=[H1, H2, H3])
+    
+    Note over API, DB: Optimistic Lock Check
+    API->>DB: Check version == 5?
+    DB-->>API: OK (Match)
+    
+    Note over API: Delta Calculation
+    API->>DB: Get existing hashes
+    API->>API: Compare. Missing = [H2]
+    API-->>Client: 200 OK { missing: [H2], upload_token: "abc" }
+    
+    Note over Client: Upload ONLY H2
+    Client->>Block: Upload Block H2
+    Block->>S3: Persist H2
+    Block->>API: Confirm H2
+    API->>DB: Update File (ver=6, blocks=[H1, H2, H3])
+```
+
+#### US-2.3: Conflict Resolution (First-Write-Wins)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant DB
+
+    Note over DB: Current Version = 10
+    Client->>API: POST /sync (ver=10, hashes=...)
+    
+    Note over API: Simulating Race Condition
+    Note right of DB: Another user just updated ver to 11
+    
+    API->>DB: UPDATE ... WHERE ver=10
+    DB-->>API: Rows Affected: 0 (Fail)
+    
+    API-->>Client: 409 CONFLICT { server_ver: 11 }
+    Note over Client: User must resolve
 ```
 
 #### QAS-016: Data Confidentiality at Rest (Encryption)
@@ -432,6 +519,20 @@ sequenceDiagram
   * **Headers**: `Authorization: Bearer <token>`, `X-File-Id: <uuid>`
   * **Body**: Binary Data
 
+### 8.3 Synchronization Interfaces
+
+#### I-04: Long Polling Interface
+
+  * **Endpoint**: `GET /notifications/poll`
+  * **Headers**: `Timeout: 60`
+  * **Behavior**: Holds connection until event or timeout.
+
+#### I-05: Delta Sync Proposal API
+
+  * **Endpoint**: `POST /files/{id}/sync`
+  * **Input**: `{"base_version": 5, "block_hashes": ["h1", "h2"]}`
+  * **Output**: `{"status": "ok", "missing_blocks": ["h2"]}` OR `409 Conflict`
+
 ## 9. Design Decisions
 
 ### 9.1 Iteration 1 Decisions
@@ -442,3 +543,12 @@ sequenceDiagram
 | **US-1.1, US-2.2** | **Block-Based Storage** | Splitting files enables parallel uploads, granular encryption, and future optimizations like Delta Sync. | **Whole File Storage**: Inefficient for large file updates. |
 | **QAS-016** | **Server-Side Encryption (Block Server)** | Centralizes security control. Avoids reliance on client-side implementation which is error-prone across multiple platforms (iOS/Android/Web). | **Client-Side Encryption**: Too complex to maintain consistency across platforms. |
 | **QAS-016** | **Proxy Upload (Client -\> Block -\> S3)** | Required to perform server-side chunking and encryption. | **Direct S3 Upload**: Forces client to handle chunking/encryption, increasing client complexity. |
+
+### 9.2 Iteration 2 Decisions (Sync)
+
+| Driver | Decision | Rationale | Discarded Alternative |
+| :--- | :--- | :--- | :--- |
+| **US-2.2** | **Block-Level Delta Sync** | Comparing hashes of blocks allows transferring only changed data, reducing bandwidth usage by orders of magnitude. | **Whole File Sync**: Too bandwidth intensive. |
+| **US-2.3** | **Optimistic Locking** | Enforces "First-Write-Wins" via database versioning. Ensures strong consistency without heavy pessimistic locks. | **Last-Write-Wins**: Risks "lost updates". |
+| **Constraint C-1** | **Long Polling** | Required by constraints. Efficient for uni-directional, infrequent notifications. | **WebSockets**: Prohibited by project constraints. |
+| **US-3.3** | **Pub/Sub Pattern** | Decouples the write path (API) from the notification path, ensuring write latency isn't affected by notification delivery speed. | **Synchronous Calls**: Tightly couples components. |
