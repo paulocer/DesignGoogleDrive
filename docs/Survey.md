@@ -28,7 +28,8 @@
 |---------|-----------|
 | - [ ] None | - [ ] Nenhum |
 | - [ ] Theoretical Only | - [ ] Apenas teórico |
-| - [ ] Some practice | - [ ] Alguma prática |
+| - [ ] Applied once | - [ ] Aplicado uma vez |
+| - [ ] Applied multiple times | - [ ] Aplicado várias vezes |
 
 ### 3. Frequency of LLM use before this project | 3. Frequência de uso de LLM antes deste projeto
 
